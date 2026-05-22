@@ -8,7 +8,7 @@ export default defineConfig({
     strictPort: true,
   },
   build: {
-    outDir: "tauri/dist",
+    outDir: "../dist",
     emptyOutDir: true,
   },
 });
