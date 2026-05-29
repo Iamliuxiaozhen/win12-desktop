@@ -1,0 +1,109 @@
+name: Update submodule
+
+on:
+  repository_dispatch:
+    types:
+      - submodule-updated
+      - update-submodule
+  workflow_dispatch:
+    inputs:
+      path:
+        description: Submodule path to update
+        required: false
+        default: tauri/src
+      ref:
+        description: Optional branch, tag, or ref to check out in the submodule
+        required: false
+      sha:
+        description: Optional exact commit SHA to check out in the submodule
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-submodule-${{ github.event.client_payload.path || inputs.path || 'tauri/src' }}
+  cancel-in-progress: false
+
+jobs:
+  update-submodule:
+    name: Update submodule pointer
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Resolve update target
+        id: target
+        shell: bash
+        env:
+          DISPATCH_PATH: ${{ github.event.client_payload.path }}
+          DISPATCH_REF: ${{ github.event.client_payload.ref }}
+          DISPATCH_SHA: ${{ github.event.client_payload.sha }}
+          INPUT_PATH: ${{ inputs.path }}
+          INPUT_REF: ${{ inputs.ref }}
+          INPUT_SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+
+          path="${DISPATCH_PATH:-${INPUT_PATH:-tauri/src}}"
+          ref="${DISPATCH_REF:-${INPUT_REF:-}}"
+          sha="${DISPATCH_SHA:-${INPUT_SHA:-}}"
+
+          if ! git config --file .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{print $2}' | grep -Fxq "$path"; then
+            echo "::error::'$path' is not a configured submodule path"
+            exit 1
+          fi
+
+          {
+            echo "path=$path"
+            echo "ref=$ref"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Update submodule
+        shell: bash
+        env:
+          SUBMODULE_PATH: ${{ steps.target.outputs.path }}
+          SUBMODULE_REF: ${{ steps.target.outputs.ref }}
+          SUBMODULE_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          git submodule sync --recursive "$SUBMODULE_PATH"
+          git submodule update --init --recursive "$SUBMODULE_PATH"
+
+          if [ -n "$SUBMODULE_SHA" ]; then
+            git -C "$SUBMODULE_PATH" fetch origin "$SUBMODULE_SHA"
+            git -C "$SUBMODULE_PATH" checkout --detach "$SUBMODULE_SHA"
+          elif [ -n "$SUBMODULE_REF" ]; then
+            git -C "$SUBMODULE_PATH" fetch origin "$SUBMODULE_REF"
+            git -C "$SUBMODULE_PATH" checkout --detach FETCH_HEAD
+          else
+            git submodule update --remote --recursive "$SUBMODULE_PATH"
+          fi
+
+          git add "$SUBMODULE_PATH"
+
+      - name: Commit and push
+        shell: bash
+        env:
+          SUBMODULE_PATH: ${{ steps.target.outputs.path }}
+        run: |
+          set -euo pipefail
+
+          if git diff --cached --quiet; then
+            echo "Submodule is already up to date."
+            exit 0
+          fi
+
+          new_sha="$(git -C "$SUBMODULE_PATH" rev-parse --short=12 HEAD)"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: update ${SUBMODULE_PATH} submodule to ${new_sha}"
+          git push
