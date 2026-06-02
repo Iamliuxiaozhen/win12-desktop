@@ -1,10 +1,6 @@
 name: Update submodule
 
 on:
-  repository_dispatch:
-    types:
-      - submodule-updated
-      - update-submodule
   workflow_dispatch:
     inputs:
       path:
