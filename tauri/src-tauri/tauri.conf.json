@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.oliver.win12",
   "build": {
-    "frontendDist": "../dist",
+    "frontendDist": "../src",
     "devUrl": "http://localhost:5173"
   },
   "app": {
