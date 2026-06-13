@@ -66,3 +66,13 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      - name: Upload Linux executable
+        if: matrix.platform == 'ubuntu-22.04'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          gh release upload "$RELEASE_TAG" \
+            "tauri/src-tauri/target/release/win12-desktop#win12-desktop-linux-x86_64" \
+            --clobber
