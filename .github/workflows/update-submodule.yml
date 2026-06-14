@@ -18,7 +18,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: update-submodule-${{ github.event.client_payload.path || inputs.path || 'tauri/src' }}
+  group: update-submodule-${{ inputs.path || 'tauri/src' }}
   cancel-in-progress: false
 
 jobs:
@@ -37,18 +37,15 @@ jobs:
         id: target
         shell: bash
         env:
-          DISPATCH_PATH: ${{ github.event.client_payload.path }}
-          DISPATCH_REF: ${{ github.event.client_payload.ref }}
-          DISPATCH_SHA: ${{ github.event.client_payload.sha }}
           INPUT_PATH: ${{ inputs.path }}
           INPUT_REF: ${{ inputs.ref }}
           INPUT_SHA: ${{ inputs.sha }}
         run: |
           set -euo pipefail
 
-          path="${DISPATCH_PATH:-${INPUT_PATH:-tauri/src}}"
-          ref="${DISPATCH_REF:-${INPUT_REF:-}}"
-          sha="${DISPATCH_SHA:-${INPUT_SHA:-}}"
+          path="${INPUT_PATH:-tauri/src}"
+          ref="${INPUT_REF:-}"
+          sha="${INPUT_SHA:-}"
 
           if ! git config --file .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{print $2}' | grep -Fxq "$path"; then
             echo "::error::'$path' is not a configured submodule path"
@@ -97,9 +94,25 @@ jobs:
             exit 0
           fi
 
-          new_sha="$(git -C "$SUBMODULE_PATH" rev-parse --short=12 HEAD)"
+          old_sha="$(git rev-parse "HEAD:${SUBMODULE_PATH}")"
+          new_sha="$(git -C "$SUBMODULE_PATH" rev-parse HEAD)"
+          commit_message="$(mktemp)"
+
+          printf '%s\n' '同步上游更改' > "$commit_message"
+          if ! git -C "$SUBMODULE_PATH" log --reverse \
+            --format='- [%h] + %s' "${old_sha}..${new_sha}" \
+            >> "$commit_message"; then
+            echo "::error::Unable to read submodule commits between ${old_sha} and ${new_sha}"
+            exit 1
+          fi
+
+          if [ "$(wc -l < "$commit_message")" -eq 1 ]; then
+            git -C "$SUBMODULE_PATH" log -1 \
+              --format='- [%h] + %s' "$new_sha" \
+              >> "$commit_message"
+          fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: update ${SUBMODULE_PATH} submodule to ${new_sha}"
+          git commit --file "$commit_message"
           git push
