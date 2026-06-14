@@ -5,11 +5,13 @@ on:
     inputs:
       tag:
         description: "Release tag，例如 v0.1.0"
+        type: string
         required: true
       title:
         description: "Release title"
+        type: string
         required: true
-        default: "Release"
+        default: "Win12-desktop vX.X.X"
 
 permissions:
   contents: write
@@ -21,8 +23,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
-            args: ""
+          - platform: macos-latest # for Arm based macs (M1 and above).
+            args: '--target aarch64-apple-darwin'
+          - platform: macos-latest # for Intel based macs.
+            args: '--target x86_64-apple-darwin'
           - platform: ubuntu-22.04
             args: "--bundles appimage,deb,rpm"
           - platform: windows-latest
@@ -32,7 +36,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -81,5 +87,5 @@ jobs:
           RELEASE_TAG: ${{ github.event.inputs.tag }}
         run: |
           gh release upload "$RELEASE_TAG" \
-            "tauri/src-tauri/target/release/win12-desktop" \
+            "tauri/src-tauri/target/release/win12-desktop#win12-desktop-linux-x86_64" \
             --clobber
