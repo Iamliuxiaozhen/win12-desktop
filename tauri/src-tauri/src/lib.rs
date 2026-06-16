@@ -29,7 +29,6 @@ struct PasswordStatus {
 #[derive(Serialize)]
 struct LoginResult {
     ok: bool,
-    created: bool,
 }
 
 fn password_hash_path() -> Result<PathBuf, String> {
@@ -45,26 +44,48 @@ fn get_login_password_status() -> Result<PasswordStatus, String> {
 }
 
 #[tauri::command]
-fn verify_or_create_login_password(password: String) -> Result<LoginResult, String> {
+fn verify_login_password(password: String) -> Result<LoginResult, String> {
     if password.is_empty() {
         return Err("Password cannot be empty".to_string());
     }
 
     let path = password_hash_path()?;
 
-    if path.exists() {
-        let hash = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        let parsed_hash = PasswordHash::new(hash.trim()).map_err(|e| e.to_string())?;
-        let ok = Argon2::default()
-            .verify_password(password.as_bytes(), &parsed_hash)
-            .is_ok();
+    if !path.exists() {
+        return Ok(LoginResult { ok: true });
+    }
 
-        return Ok(LoginResult { ok, created: false });
+    let hash = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let parsed_hash = PasswordHash::new(hash.trim()).map_err(|e| e.to_string())?;
+    let ok = Argon2::default()
+        .verify_password(password.as_bytes(), &parsed_hash)
+        .is_ok();
+
+    Ok(LoginResult { ok })
+}
+
+#[tauri::command]
+fn set_login_password(
+    current_password: Option<String>,
+    new_password: String,
+) -> Result<(), String> {
+    if new_password.is_empty() {
+        return Err("Password cannot be empty".to_string());
+    }
+
+    let path = password_hash_path()?;
+
+    if path.exists() {
+        let current_password =
+            current_password.ok_or("Current password is required".to_string())?;
+        if !verify_login_password(current_password)?.ok {
+            return Err("Current password is incorrect".to_string());
+        }
     }
 
     let salt = SaltString::generate(&mut OsRng);
     let password_hash = Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(new_password.as_bytes(), &salt)
         .map_err(|e| e.to_string())?
         .to_string();
 
@@ -74,10 +95,7 @@ fn verify_or_create_login_password(password: String) -> Result<LoginResult, Stri
 
     fs::write(&path, password_hash).map_err(|e| e.to_string())?;
 
-    Ok(LoginResult {
-        ok: true,
-        created: true,
-    })
+    Ok(())
 }
 
 #[tauri::command]
@@ -165,7 +183,8 @@ pub fn run() {
             get_battery_info,
             get_network_info,
             get_login_password_status,
-            verify_or_create_login_password
+            verify_login_password,
+            set_login_password
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
