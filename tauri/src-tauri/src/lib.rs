@@ -69,18 +69,22 @@ fn set_login_password(
     current_password: Option<String>,
     new_password: String,
 ) -> Result<(), String> {
-    if new_password.is_empty() {
-        return Err("Password cannot be empty".to_string());
-    }
-
     let path = password_hash_path()?;
+    let has_password = path.exists();
 
-    if path.exists() {
+    if has_password {
         let current_password =
             current_password.ok_or("Current password is required".to_string())?;
         if !verify_login_password(current_password)?.ok {
             return Err("Current password is incorrect".to_string());
         }
+    }
+
+    if new_password.is_empty() {
+        if has_password {
+            fs::remove_file(&path).map_err(|e| e.to_string())?;
+        }
+        return Ok(());
     }
 
     let salt = SaltString::generate(&mut OsRng);
