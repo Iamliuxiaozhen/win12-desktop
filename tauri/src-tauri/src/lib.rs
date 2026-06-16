@@ -32,8 +32,8 @@ struct LoginResult {
 }
 
 fn password_hash_path() -> Result<PathBuf, String> {
-    let home = dirs::home_dir().ok_or("Cannot find user home directory")?;
-    Ok(home.join(".win").join("password.hash"))
+    let data_dir = dirs::data_dir().ok_or("Cannot find user data directory")?;
+    Ok(data_dir.join("win12-desktop").join("password.hash"))
 }
 
 #[tauri::command]
