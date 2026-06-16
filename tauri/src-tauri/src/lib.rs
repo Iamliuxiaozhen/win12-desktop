@@ -1,5 +1,11 @@
+use argon2::{
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
 use network_interface::{NetworkInterface, NetworkInterfaceConfig};
+use rand_core::OsRng;
 use serde::Serialize;
+use std::{fs, path::PathBuf};
 
 #[derive(Serialize)]
 struct BatteryInfo {
@@ -13,6 +19,87 @@ struct NetworkInfo {
     online: bool,
     kind: String,
     name: String,
+}
+
+#[derive(Serialize)]
+struct PasswordStatus {
+    has_password: bool,
+}
+
+#[derive(Serialize)]
+struct LoginResult {
+    ok: bool,
+}
+
+fn password_hash_path() -> Result<PathBuf, String> {
+    let data_dir = dirs::data_dir().ok_or("Cannot find user data directory")?;
+    Ok(data_dir.join("win12-desktop").join("password.hash"))
+}
+
+#[tauri::command]
+fn get_login_password_status() -> Result<PasswordStatus, String> {
+    Ok(PasswordStatus {
+        has_password: password_hash_path()?.exists(),
+    })
+}
+
+#[tauri::command]
+fn verify_login_password(password: String) -> Result<LoginResult, String> {
+    if password.is_empty() {
+        return Err("Password cannot be empty".to_string());
+    }
+
+    let path = password_hash_path()?;
+
+    if !path.exists() {
+        return Ok(LoginResult { ok: true });
+    }
+
+    let hash = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let parsed_hash = PasswordHash::new(hash.trim()).map_err(|e| e.to_string())?;
+    let ok = Argon2::default()
+        .verify_password(password.as_bytes(), &parsed_hash)
+        .is_ok();
+
+    Ok(LoginResult { ok })
+}
+
+#[tauri::command]
+fn set_login_password(
+    current_password: Option<String>,
+    new_password: String,
+) -> Result<(), String> {
+    let path = password_hash_path()?;
+    let has_password = path.exists();
+
+    if has_password {
+        let current_password =
+            current_password.ok_or("Current password is required".to_string())?;
+        if !verify_login_password(current_password)?.ok {
+            return Err("Current password is incorrect".to_string());
+        }
+    }
+
+    if new_password.is_empty() {
+        if has_password {
+            fs::remove_file(&path).map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+
+    let salt = SaltString::generate(&mut OsRng);
+    let password_hash = Argon2::default()
+        .hash_password(new_password.as_bytes(), &salt)
+        .map_err(|e| e.to_string())?
+        .to_string();
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    fs::write(&path, password_hash).map_err(|e| e.to_string())?;
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -98,7 +185,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             get_battery_info,
-            get_network_info
+            get_network_info,
+            get_login_password_status,
+            verify_login_password,
+            set_login_password
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
