@@ -5,7 +5,7 @@ use argon2::{
 use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 use rand_core::OsRng;
 use serde::Serialize;
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, process::Command};
 
 #[derive(Serialize)]
 struct BatteryInfo {
@@ -179,6 +179,46 @@ fn get_network_info() -> Result<NetworkInfo, String> {
     })
 }
 
+#[tauri::command]
+fn ping_host(host: String) -> Result<String, String> {
+    let host = host.trim();
+
+    if host.is_empty() {
+        return Err("Usage: ping <host>".to_string());
+    }
+
+    if host.split_whitespace().count() != 1 || host.starts_with('-') || host.starts_with('/') {
+        return Err("Only a single host or IP address is supported".to_string());
+    }
+
+    let mut command = Command::new("ping");
+
+    #[cfg(target_os = "windows")]
+    command.args(["-n", "4", host]);
+
+    #[cfg(not(target_os = "windows"))]
+    command.args(["-c", "4", host]);
+
+    let output = command.output().map_err(|e| e.to_string())?;
+    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !stderr.trim().is_empty() {
+            if !text.ends_with('\n') && !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&stderr);
+        }
+    }
+
+    if text.trim().is_empty() {
+        return Err("Ping command returned no output".to_string());
+    }
+
+    Ok(text)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -188,7 +228,8 @@ pub fn run() {
             get_network_info,
             get_login_password_status,
             verify_login_password,
-            set_login_password
+            set_login_password,
+            ping_host
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
