@@ -180,8 +180,9 @@ fn get_network_info() -> Result<NetworkInfo, String> {
 }
 
 #[tauri::command]
-fn ping_host(host: String) -> Result<String, String> {
+fn ping_host(host: String, ipv6: Option<bool>) -> Result<String, String> {
     let host = host.trim();
+    let ipv6 = ipv6.unwrap_or(false);
 
     if host.is_empty() {
         return Err("Usage: ping <host>".to_string());
@@ -191,10 +192,20 @@ fn ping_host(host: String) -> Result<String, String> {
         return Err("Only a single host or IP address is supported".to_string());
     }
 
-    let mut command = Command::new("ping");
+    let mut command = if ipv6 && !cfg!(target_os = "windows") {
+        Command::new("ping6")
+    } else {
+        Command::new("ping")
+    };
 
     #[cfg(target_os = "windows")]
-    command.args(["-n", "4", host]);
+    {
+        if ipv6 {
+            command.args(["-6", "-n", "4", host]);
+        } else {
+            command.args(["-n", "4", host]);
+        }
+    }
 
     #[cfg(not(target_os = "windows"))]
     command.args(["-c", "4", host]);
