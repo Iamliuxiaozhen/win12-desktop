@@ -5,7 +5,14 @@ use argon2::{
 use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 use rand_core::OsRng;
 use serde::Serialize;
-use std::{fs, path::PathBuf, process::Command};
+use std::{
+    fs,
+    io::BufRead,
+    path::PathBuf,
+    process::{Command, Stdio},
+    thread,
+};
+use tauri::Emitter;
 
 #[derive(Serialize)]
 struct BatteryInfo {
@@ -29,6 +36,14 @@ struct PasswordStatus {
 #[derive(Serialize)]
 struct LoginResult {
     ok: bool,
+}
+
+#[derive(Clone, Serialize)]
+struct PingOutput {
+    request_id: String,
+    text: String,
+    done: bool,
+    success: bool,
 }
 
 fn password_hash_path() -> Result<PathBuf, String> {
@@ -180,7 +195,12 @@ fn get_network_info() -> Result<NetworkInfo, String> {
 }
 
 #[tauri::command]
-fn ping_host(host: String, ipv6: Option<bool>) -> Result<String, String> {
+fn ping_host(
+    window: tauri::Window,
+    host: String,
+    ipv6: Option<bool>,
+    request_id: String,
+) -> Result<(), String> {
     let host = host.trim();
     let ipv6 = ipv6.unwrap_or(false);
 
@@ -192,42 +212,99 @@ fn ping_host(host: String, ipv6: Option<bool>) -> Result<String, String> {
         return Err("Only a single host or IP address is supported".to_string());
     }
 
-    let mut command = if ipv6 && !cfg!(target_os = "windows") {
-        Command::new("ping6")
-    } else {
-        Command::new("ping")
-    };
-
-    #[cfg(target_os = "windows")]
-    {
-        if ipv6 {
-            command.args(["-6", "-n", "4", host]);
+    let host = host.to_string();
+    thread::spawn(move || {
+        let mut command = if ipv6 && !cfg!(target_os = "windows") {
+            Command::new("ping6")
         } else {
-            command.args(["-n", "4", host]);
-        }
-    }
+            Command::new("ping")
+        };
 
-    #[cfg(not(target_os = "windows"))]
-    command.args(["-c", "4", host]);
-
-    let output = command.output().map_err(|e| e.to_string())?;
-    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !stderr.trim().is_empty() {
-            if !text.ends_with('\n') && !text.is_empty() {
-                text.push('\n');
+        #[cfg(target_os = "windows")]
+        {
+            if ipv6 {
+                command.args(["-6", "-n", "4", &host]);
+            } else {
+                command.args(["-n", "4", &host]);
             }
-            text.push_str(&stderr);
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        command.args(["-c", "4", &host]);
+
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(e) => {
+                emit_ping_output(&window, &request_id, format!("{}\n", e), true, false);
+                return;
+            }
+        };
+
+        let stdout_handle = child.stdout.take().map(|stdout| {
+            let window = window.clone();
+            let request_id = request_id.clone();
+            thread::spawn(move || stream_ping_output(stdout, window, request_id))
+        });
+
+        let stderr_handle = child.stderr.take().map(|stderr| {
+            let window = window.clone();
+            let request_id = request_id.clone();
+            thread::spawn(move || stream_ping_output(stderr, window, request_id))
+        });
+
+        let success = child.wait().map(|status| status.success()).unwrap_or(false);
+
+        if let Some(handle) = stdout_handle {
+            let _ = handle.join();
+        }
+        if let Some(handle) = stderr_handle {
+            let _ = handle.join();
+        }
+
+        emit_ping_output(&window, &request_id, "", true, success);
+    });
+
+    Ok(())
+}
+
+fn stream_ping_output<R: std::io::Read>(stream: R, window: tauri::Window, request_id: String) {
+    let mut reader = std::io::BufReader::new(stream);
+    let mut buffer = Vec::new();
+
+    loop {
+        buffer.clear();
+        match reader.read_until(b'\n', &mut buffer) {
+            Ok(0) => break,
+            Ok(_) => {
+                let text = String::from_utf8_lossy(&buffer).to_string();
+                emit_ping_output(&window, &request_id, text, false, true);
+            }
+            Err(e) => {
+                emit_ping_output(&window, &request_id, format!("{}\n", e), false, false);
+                break;
+            }
         }
     }
+}
 
-    if text.trim().is_empty() {
-        return Err("Ping command returned no output".to_string());
-    }
-
-    Ok(text)
+fn emit_ping_output(
+    window: &tauri::Window,
+    request_id: &str,
+    text: impl Into<String>,
+    done: bool,
+    success: bool,
+) {
+    let _ = window.emit(
+        "win12://ping-output",
+        PingOutput {
+            request_id: request_id.to_string(),
+            text: text.into(),
+            done,
+            success,
+        },
+    );
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
