@@ -1,0 +1,40 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple Silicon)
+            platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+            rust-targets: aarch64-apple-darwin
+          - name: macOS (Intel)
+            platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+            rust-targets: x86_64-apple-darwin
+          - name: Linux (x86_64)
+            platform: ubuntu-22.04
+            args: "--bundles appimage,deb,rpm"
+            rust-targets: ""
+          - name: Windows (x86_64)
+            platform: windows-latest
+            args: ""
+            rust-targets: ""
+
+    uses: ./.github/workflows/_shared-build.yaml
+    with:
+      platform: ${{ matrix.platform }}
+      args: ${{ matrix.args }}
+      rust-targets: ${{ matrix.rust-targets }}
+      name: ${{ matrix.name }}

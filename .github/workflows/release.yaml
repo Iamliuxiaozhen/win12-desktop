@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag，例如 v0.1.0"
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+            name: macOS (Apple Silicon)
+            rust-targets: aarch64-apple-darwin
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+            name: macOS (Intel)
+            rust-targets: x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            args: "--bundles appimage,deb,rpm"
+            name: Linux (x86_64)
+            rust-targets: ""
+          - platform: windows-latest
+            args: ""
+            name: Windows (x86_64)
+            rust-targets: ""
+
+    uses: ./.github/workflows/_shared-build.yaml
+    with:
+      platform: ${{ matrix.platform }}
+      args: ${{ matrix.args }}
+      rust-targets: ${{ matrix.rust-targets }}
+      name: ${{ matrix.name }}
+
+  publish:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tauri-bundles-*
+          path: ./release
+          merge-multiple: true
+      - name: Debug - list files
+        run: |
+          tree .
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: Win12-desktop ${{ inputs.tag }}
+          body: |
+            # Win12 Desktop ${{ inputs.tag }}
+          draft: true
+          prerelease: false
+          files: |
+            release/**/*
