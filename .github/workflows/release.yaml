@@ -7,13 +7,29 @@ on:
         description: "Release tag，例如 v0.1.0"
         type: string
         required: true
+      confirm_release:
+        description: "我确认已完成本次版本发行所需的全部准备工作（包括但不限于版本号更新、CHANGELOG 更新、文档同步、代码审查及必要测试）。"
+        type: boolean
+        default: false
+        required: true
 
 permissions:
   contents: write
 
 jobs:
+  confirm-release:
+    name: Confirm Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check release confirmation
+        if: ${{ inputs.confirm_release != true }}
+        run: |
+          echo "❌ 发行已取消：请先确认已完成所有发行前准备工作。"
+          exit 1
+
   build:
     name: Build ${{ matrix.platform }}
+    needs: confirm-release
     strategy:
       fail-fast: false
       matrix:
