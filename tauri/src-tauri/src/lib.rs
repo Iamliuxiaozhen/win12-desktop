@@ -5,7 +5,14 @@ use argon2::{
 use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 use rand_core::OsRng;
 use serde::Serialize;
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    io::BufRead,
+    path::PathBuf,
+    process::{Command, Stdio},
+    thread,
+};
+use tauri::Emitter;
 
 #[derive(Serialize)]
 struct BatteryInfo {
@@ -29,6 +36,14 @@ struct PasswordStatus {
 #[derive(Serialize)]
 struct LoginResult {
     ok: bool,
+}
+
+#[derive(Clone, Serialize)]
+struct PingOutput {
+    request_id: String,
+    text: String,
+    done: bool,
+    success: bool,
 }
 
 fn password_hash_path() -> Result<PathBuf, String> {
@@ -179,6 +194,119 @@ fn get_network_info() -> Result<NetworkInfo, String> {
     })
 }
 
+#[tauri::command]
+fn ping_host(
+    window: tauri::Window,
+    host: String,
+    ipv6: Option<bool>,
+    request_id: String,
+) -> Result<(), String> {
+    let host = host.trim();
+    let ipv6 = ipv6.unwrap_or(false);
+
+    if host.is_empty() {
+        return Err("Usage: ping <host>".to_string());
+    }
+
+    if host.split_whitespace().count() != 1 || host.starts_with('-') || host.starts_with('/') {
+        return Err("Only a single host or IP address is supported".to_string());
+    }
+
+    let host = host.to_string();
+    thread::spawn(move || {
+        let mut command = if ipv6 && !cfg!(target_os = "windows") {
+            Command::new("ping6")
+        } else {
+            Command::new("ping")
+        };
+
+        #[cfg(target_os = "windows")]
+        {
+            if ipv6 {
+                command.args(["-6", "-n", "4", &host]);
+            } else {
+                command.args(["-n", "4", &host]);
+            }
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        command.args(["-c", "4", &host]);
+
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(e) => {
+                emit_ping_output(&window, &request_id, format!("{}\n", e), true, false);
+                return;
+            }
+        };
+
+        let stdout_handle = child.stdout.take().map(|stdout| {
+            let window = window.clone();
+            let request_id = request_id.clone();
+            thread::spawn(move || stream_ping_output(stdout, window, request_id))
+        });
+
+        let stderr_handle = child.stderr.take().map(|stderr| {
+            let window = window.clone();
+            let request_id = request_id.clone();
+            thread::spawn(move || stream_ping_output(stderr, window, request_id))
+        });
+
+        let success = child.wait().map(|status| status.success()).unwrap_or(false);
+
+        if let Some(handle) = stdout_handle {
+            let _ = handle.join();
+        }
+        if let Some(handle) = stderr_handle {
+            let _ = handle.join();
+        }
+
+        emit_ping_output(&window, &request_id, "", true, success);
+    });
+
+    Ok(())
+}
+
+fn stream_ping_output<R: std::io::Read>(stream: R, window: tauri::Window, request_id: String) {
+    let mut reader = std::io::BufReader::new(stream);
+    let mut buffer = Vec::new();
+
+    loop {
+        buffer.clear();
+        match reader.read_until(b'\n', &mut buffer) {
+            Ok(0) => break,
+            Ok(_) => {
+                let text = String::from_utf8_lossy(&buffer).to_string();
+                emit_ping_output(&window, &request_id, text, false, true);
+            }
+            Err(e) => {
+                emit_ping_output(&window, &request_id, format!("{}\n", e), false, false);
+                break;
+            }
+        }
+    }
+}
+
+fn emit_ping_output(
+    window: &tauri::Window,
+    request_id: &str,
+    text: impl Into<String>,
+    done: bool,
+    success: bool,
+) {
+    let _ = window.emit(
+        "win12://ping-output",
+        PingOutput {
+            request_id: request_id.to_string(),
+            text: text.into(),
+            done,
+            success,
+        },
+    );
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -188,7 +316,8 @@ pub fn run() {
             get_network_info,
             get_login_password_status,
             verify_login_password,
-            set_login_password
+            set_login_password,
+            ping_host
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
