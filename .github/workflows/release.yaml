@@ -73,18 +73,35 @@ jobs:
       - name: Debug - list files
         run: |
           tree .
+      - name: Generate release notes
+        shell: bash
+        run: |
+          {
+            echo "# Win12 Desktop ${{ inputs.tag }}"
+            echo
+            echo "其他下载地址："
+            echo
+            echo "[![Mirror nju.mirror.edu.cn](https://img.shields.io/badge/Mirror-nju.mirror.edu.cn-61dafb.svg?style=flat-square)](https://mirror.nju.edu.cn/github-release/win12-online/win12-desktop/)"
+            echo
+            echo "## 文件校验"
+            echo
+            echo "| File | Checksum (SHA256) |"
+            echo "| --- | --- |"
+            find release -maxdepth 1 -type f -print0 \
+              | sort -z \
+              | while IFS= read -r -d '' file; do
+                  checksum="$(sha256sum "$file" | awk '{ print toupper($1) }')"
+                  filename="$(basename "$file")"
+                  echo "| \`$filename\` | \`$checksum\` |"
+                done
+          } > release-notes.md
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.BEDEVERE_WIN12_BOT_TOKEN }}
           tag_name: ${{ inputs.tag }}
           name: Win12-desktop ${{ inputs.tag }}
-          body: |
-            # Win12 Desktop ${{ inputs.tag }}
-
-            其他下载地址：
-
-            [![Mirror nju.mirror.edu.cn](https://img.shields.io/badge/Mirror-nju.mirror.edu.cn-61dafb.svg?style=flat-square)](https://mirror.nju.edu.cn/github-release/win12-online/win12-desktop/)
+          body_path: release-notes.md
           draft: true
           prerelease: false
           files: |
