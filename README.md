@@ -1,6 +1,9 @@
 # win12-desktop
 win12 桌面端，基于 Tauri 封装，将 Windows 12 网页版变成独立桌面应用。
 
+## 维护守则
+
+拥有仓库管理、发布或工作流修改权限的维护者，请遵守 [维护者守则](./MAINTAINER_RULES.md)。撤销发行版、处理 Issue、修改 GitHub Actions 工作流等操作应保留公开记录，并按守则要求经过 Issue 讨论和 PR 合并。
 
 ## 关于调试
 
