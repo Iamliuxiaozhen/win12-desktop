@@ -75,9 +75,8 @@ jobs:
           tree .
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.BEDEVERE_WIN12_BOT_TOKEN }}
         with:
+          token: ${{ secrets.BEDEVERE_WIN12_BOT_TOKEN }}
           tag_name: ${{ inputs.tag }}
           name: Win12-desktop ${{ inputs.tag }}
           body: |
