@@ -85,7 +85,7 @@ jobs:
             其他下载地址：
 
             [![Mirror nju.mirror.edu.cn](https://img.shields.io/badge/Mirror-nju.mirror.edu.cn-61dafb.svg?style=flat-square)](https://mirror.nju.edu.cn/github-release/win12-online/win12-desktop/)
-          draft: false
+          draft: true
           prerelease: false
           files: |
             release/**/*
