@@ -75,12 +75,28 @@ jobs:
           tree .
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.BEDEVERE_WIN12_BOT_TOKEN }}
         with:
           tag_name: ${{ inputs.tag }}
           name: Win12-desktop ${{ inputs.tag }}
           body: |
             # Win12 Desktop ${{ inputs.tag }}
+
+            其他下载地址：
+
+            [![Mirror nju.mirror.edu.cn](https://img.shields.io/badge/Mirror-nju.mirror.edu.cn-61dafb.svg?style=flat-square)](https://mirror.nju.edu.cn/github-release/win12-online/win12-desktop/)
           draft: true
           prerelease: false
           files: |
             release/**/*
+      - name: Trigger NJU mirror sync
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.NJU_MIRROR_SSH_KEY }}" > ~/.ssh/nju_key
+          chmod 600 ~/.ssh/nju_key
+          ssh -i ~/.ssh/nju_key \
+            -p 52222 \
+            -o StrictHostKeyChecking=no \
+            sync@mirror.nju.edu.cn \
+            "exit" || true
