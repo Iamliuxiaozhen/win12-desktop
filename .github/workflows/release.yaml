@@ -98,5 +98,5 @@ jobs:
           ssh -i ~/.ssh/nju_key \
             -p 52222 \
             -o StrictHostKeyChecking=no \
-            sync@mirror.nju.edu.cn \
-            "exit" || true
+            pushsync@mirror.nju.edu.cn \
+            github-release
